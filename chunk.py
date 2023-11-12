@@ -13,19 +13,17 @@ RESULT_BACKEND = os.getenv("CELERY_RESULT_BACKEND")
 celery_app = Celery('chunk', broker=BROKER_URL,
                     backend=RESULT_BACKEND)
 
-def upload_playlist(client, filename: str):
+def upload_playlist(client, filename_noext: str,user_folder:str):
     for i in os.listdir(chunk_output):
-        if not i.startswith(filename):
+        if not i.startswith(filename_noext):
             continue
         if ".m3u8" in i:
-            s3utils.upload_s3_file(client, f"{chunk_output}/{i}", i)
+            s3utils.upload_s3_file(client, f"{chunk_output}/{i}", f"{user_folder}/{i}")
         else:
-            s3utils.upload_s3_file(
-                client, f"{chunk_output}/{i}", f"{filename}/{i}"
-            )
+            s3utils.upload_s3_file(client, f"{chunk_output}/{i}", f"{user_folder}/{i}")
 
 @celery_app.task(name="chunk")
-def chunk():
+def chunk(filename, s3_file_path):
     client = boto3.client(
     's3',
     aws_access_key_id=os.getenv("S3_ACCESS_KEY"),
@@ -34,13 +32,16 @@ def chunk():
     utils.create_dir(raw_video)
     utils.create_dir(chunk_output)
     print("Chunking video into segments")
-    file = 'bahn.mp4'
-    filename, extension = utils.extract_ext(file)
-    output_file = f"{filename}.m3u8"
+    print("filename = "+filename)
+    print("s3_file_path = "+s3_file_path)
+    file = filename
+    filename_noext, extension = utils.extract_ext(file)
+    output_file = f"{filename_noext}.m3u8"
+    user_folder = s3_file_path.split('/',1)[0]
     BUCKET_NAME = 'toktikbucket'
-    S3_PATH = 'example_user/bahn.mp4'
+    S3_PATH = s3_file_path #'example_user/bahn.mp4'
     LOCAL_PATH=f"{raw_video}/{filename}"
-    S3_UPLOAD_PATH = f'example_user/{output_file}'
+    S3_UPLOAD_PATH = f'{user_folder}/{output_file}' #f'example_user/{output_file}'
     VIDEO_CHUNK_SEC = "5"
     client.download_file(Bucket=BUCKET_NAME, Key=S3_PATH, Filename=LOCAL_PATH)
     # s3utils.download_s3_file(client= client, local_path=LOCAL_PATH, s3_path=S3_PATH)
@@ -63,9 +64,9 @@ def chunk():
                 ]
             )
     print("done chunking")
-    upload_playlist(client, filename)
+    upload_playlist(client, filename_noext,user_folder)
     print("done upload to s3")
-    # utils.clean_dir(filename)
+    utils.clean_dir(filename)
 
 if __name__ == "__main__":
     chunk()
